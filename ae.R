@@ -5,7 +5,7 @@ sae.train <- function(x,hidden=c(10),
                       learningrate_scale=1,
                       output="sigm",
                       numepochs=3,batchsize=100,
-                      hidden_dropout=0,visible_dropout=0.2                      
+                      hidden_dropout=0,visible_dropout=0.2,L2=0,L1=0
 ){
   #if (!is.matrix(x)) 
   #  stop("x must be a matrix!")
@@ -25,14 +25,17 @@ sae.train <- function(x,hidden=c(10),
                                 learningrate_scale=learningrate_scale,
                                 output=output,
                                 numepochs=numepochs,batchsize=batchsize,
-                                hidden_dropout=hidden_dropout,visible_dropout=visible_dropout)
+                                hidden_dropout=hidden_dropout,visible_dropout=visible_dropout,
+                                L2=L2,L1=L1)
   
   if(length(sae$size) > 2){
     for(i in 2:(length(sae$size) - 1)){
       pre <- t( sae$encoder[[i-1]]$W[[1]] %*% t(train_x) + sae$encoder[[i-1]]$B[[i-1]] )
-      if(sae$encoder[[i-1]]$activationfun == "sigm"){
+      if(sae$encoder[[i-1]]$activationfun[i-1] == "sigm"){
         post <- sigm( pre )
-      }else if(sae$encoder[[i-1]]$activationfun == "tanh"){
+      }else if(sae$encoder[[i-1]]$activationfun[i-1] == "binsigm"){
+        post <- binsigm( pre )
+      }else if(sae$encoder[[i-1]]$activationfun[i-1] == "tanh"){
         post <- tanh(pre)
       }else{
         stop("unsupport activation function 'nn$activationfun'");
@@ -46,7 +49,7 @@ sae.train <- function(x,hidden=c(10),
                                    learningrate_scale=learningrate_scale,
                                    output=output,
                                    numepochs=numepochs,batchsize=batchsize,
-                                   hidden_dropout=hidden_dropout,visible_dropout=visible_dropout)
+                                   hidden_dropout=hidden_dropout,visible_dropout=visible_dropout,L2=L2,L1=L1)
     }
   }
   sae
@@ -60,7 +63,7 @@ sae.dnn.train <- function(x,y,hidden=c(10),
                           output="sigm",
                           sae_output="linear",
                           numepochs=3,batchsize=100,
-                          hidden_dropout=0,visible_dropout=0){
+                          hidden_dropout=0,visible_dropout=0,L2=0,L1=0){
   output_dim <- 0
   if(is.vector(y)){
     output_dim <- 1
@@ -76,7 +79,7 @@ sae.dnn.train <- function(x,y,hidden=c(10),
                    numepochs=numepochs,batchsize=batchsize,
                    learningrate=learningrate,learningrate_scale=learningrate_scale,
                    momentum=momentum,
-                   hidden_dropout=hidden_dropout,visible_dropout=visible_dropout)
+                   hidden_dropout=hidden_dropout,visible_dropout=visible_dropout,L2=L2,L1=L1)
   message("sae has been trained.")
   initW <- list()
   initB <- list()
@@ -96,7 +99,7 @@ sae.dnn.train <- function(x,y,hidden=c(10),
                   learningrate_scale=learningrate_scale,
                   output=output,
                   numepochs=numepochs,batchsize=batchsize,
-                  hidden_dropout=hidden_dropout,visible_dropout=visible_dropout)
+                  hidden_dropout=hidden_dropout,visible_dropout=visible_dropout,L2=L2,L1=L1)
   message("deep nn has been trained.")
   dnn
 }
@@ -106,6 +109,10 @@ sigm <- function(x){
   1/(1+exp(-x))
 }
 
+binsigm <- function(x,t=0.5){
+  1*(sigm(x)>t)
+}
+
 nn.train <- function(x,y,initW=NULL,initB=NULL,hidden=c(10),
                      activationfun="sigm",
                      learningrate=0.8,
@@ -113,7 +120,7 @@ nn.train <- function(x,y,initW=NULL,initB=NULL,hidden=c(10),
                      learningrate_scale=1,
                      output="sigm",
                      numepochs=3,batchsize=100,
-                     hidden_dropout=0,visible_dropout=0) {
+                     hidden_dropout=0,visible_dropout=0,L2=0,L1=0) {
   #if (!is.matrix(x)) 
   # stop("x must be a matrix!")
   input_dim <- ncol(x)
@@ -153,6 +160,10 @@ nn.train <- function(x,y,initW=NULL,initB=NULL,hidden=c(10),
     }
   }
   
+  if(length(activationfun)==1){
+    activationfun=rep(activationfun,length(size)-1)  
+  }
+  
   nn <- list(
     input_dim = input_dim,
     output_dim = output_dim,
@@ -167,7 +178,9 @@ nn.train <- function(x,y,initW=NULL,initB=NULL,hidden=c(10),
     W = W,
     vW = vW,
     B = B,
-    vB = vB
+    vB = vB,
+    L2=L2,
+    L1=L1
   )
   
   m <- nrow(x);
@@ -184,7 +197,6 @@ nn.train <- function(x,y,initW=NULL,initB=NULL,hidden=c(10),
         }else{ # if(is.matrix(y)){
           batch_y <- y[randperm[((l-1)*batchsize+1):(l*batchsize)], ] 
         }
-        
         nn <- nn.ff(nn,batch_x,batch_y,s)
         nn <- nn.bp(nn)						
       }
@@ -218,9 +230,11 @@ nn.ff <- function(nn,batch_x,batch_y,s){
   nn$post[[1]] <- batch_x
   for(i in 2:(length(nn$size) - 1)){
     nn$pre[[i]] <- t( nn$W[[i-1]] %*% t(nn$post[[(i-1)]])  + nn$B[[i-1]] )
-    if(nn$activationfun == "sigm"){
+    if(nn$activationfun[i-1] == "sigm"){
       nn$post[[i]] <- sigm(nn$pre[[i]])
-    }else if(nn$activationfun == "tanh"){
+    }else if(nn$activationfun[i-1]=='binsigm'){
+      nn$post[[i]] <- binsigm(nn$pre[[i]])
+    }else if(nn$activationfun[i-1] == "tanh"){
       nn$post[[i]] <- tanh(nn$pre[[i]])
     }else{
       stop("unsupport activation function!");
@@ -267,9 +281,9 @@ nn.bp <- function(nn){
   }
   
   for( i in (n-1):2 ){
-    if(nn$activationfun  == "sigm"){
+    if(nn$activationfun[i-1] %in% c('binsigm',"sigm")){
       d_act <- nn$post[[i]] * (1-nn$post[[i]])
-    }else if(nn$activationfun  == "tanh" ){
+    }else if(nn$activationfun[i-1]  == "tanh" ){
       d_act <- 1.7159 * 2/3 * (1 - 1/(1.7159)^2 * nn$post[[i]]^2)
     }
     d[[i]] <- (d[[i+1]] %*% nn$W[[i]]) * d_act
@@ -285,7 +299,11 @@ nn.bp <- function(nn){
       nn$vW[[i]] <- nn$momentum * nn$vW[[i]] + dw
       dw <- nn$vW[[i]]
     }
-    nn$W[[i]] <- nn$W[[i]] - dw
+    #nn$W[[i]] <- nn$W[[i]] - dw
+    #nn$W[[i]] <- nn$W[[i]]*(1-nn$learningrate*nn$L2/nrow(d[[i+1]])) - sign(nn$W[[i]])*nn$learningrate*nn$L1/nrow(d[[i+1]]) - dw  #add regularization
+    nn$W[[i]] <- nn$W[[i]]*(1-nn$learningrate*nn$L2) - dw #L2 and gradient
+    #nn$W[[i]] <- nn$W[[i]] - sign(nn$W[[i]])*pmin(abs(nn$W[[i]]),nn$learningrate*nn$L1)  #L1
+    nn$W[[i]] <- sign(nn$W[[i]])*pmax(abs(nn$W[[i]])-nn$learningrate*nn$L1,0)  #L1
     
     db <- colMeans(d[[i+1]])
     db <- db * nn$learningrate
@@ -311,9 +329,11 @@ nn.predict <- function(nn,x){
   #hidden layer
   for(i in 2:(length(nn$size) - 1)){
     pre <- t( nn$W[[i-1]] %*% t(post) + nn$B[[i-1]] )
-    if(nn$activationfun == "sigm"){
+    if(nn$activationfun[i-1] == "sigm"){
       post <- sigm( pre )
-    }else if(nn$activationfun == "tanh"){
+    }else if(nn$activationfun[i-1] == "binsigm"){
+      post <- binsigm( pre )
+    }else if(nn$activationfun[i-1] == "tanh"){
       post <- tanh(pre)
     }else{
       stop("unsupport activation function 'nn$activationfun'");
@@ -368,12 +388,13 @@ nn.test <- function (nn,x,y,t=0.5){
 
 unfoldsae=function(x,sae,
                    activationfun="sigm",
+                   codeactivationfun='sigm',
                    learningrate=0.8,
                    momentum=0.5,
                    learningrate_scale=1,
                    output="linear",
                    numepochs=3,batchsize=100,
-                   hidden_dropout=0,visible_dropout=0){
+                   hidden_dropout=0.5,visible_dropout=0,L2=0,L1=0){
   output_dim=sae$size[1]
   initW <- list()
   initB <- list()
@@ -384,15 +405,21 @@ unfoldsae=function(x,sae,
   nl=length(initW)
   j=nl+1
   for(i in seq(nl,1,by=-1)){
-    initW[[j]] <- t(initW[[i]])
+    initW[[j]] <- sae$encoder[[i]]$W[[2]]
+    #initW[[j]] <- t(initW[[i]])
     if(i>1){
-      initB[[j]] <- initB[[i-1]]
+      initB[[j]] <- sae$encoder[[i]]$B[[2]]
+      #initB[[j]] <- initB[[i-1]]
     }else{
       initB[[j]] <- runif(output_dim,min=-0.1,max=0.1)
     }
     j=j+1
   }
   hid=c(sae$hidden,rev(sae$hidden)[-1])
+  if(length(activationfun)==1){
+    activationfun=rep(activationfun,length(hid)+1)
+    activationfun[nl]=codeactivationfun
+  }
   dnn <- nn.train(x,x,initW=initW,initB=initB,hidden=hid,
                   activationfun=activationfun,
                   learningrate=learningrate,
@@ -400,6 +427,6 @@ unfoldsae=function(x,sae,
                   learningrate_scale=learningrate_scale,
                   output=output,
                   numepochs=numepochs,batchsize=batchsize,
-                  hidden_dropout=hidden_dropout,visible_dropout=visible_dropout)
+                  hidden_dropout=hidden_dropout,visible_dropout=visible_dropout,L2=L2,L1=L1)
   dnn
 }
