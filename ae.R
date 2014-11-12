@@ -7,7 +7,7 @@ sae.train <- function(x,hidden=c(10),
                       numepochs=3,batchsize=100,
                       hidden_dropout=0,visible_dropout=0.2,L2=0,L1=0,
                       momentummax=.99,momentum_scale=1,
-                      rmsprop=0){
+                      adadelta=0){
   #if (!is.matrix(x)) 
   #  stop("x must be a matrix!")
   input_dim <- ncol(x)
@@ -29,7 +29,7 @@ sae.train <- function(x,hidden=c(10),
                                 hidden_dropout=hidden_dropout,visible_dropout=visible_dropout,
                                 L2=L2,L1=L1,
                                 momentummax=momentummax,momentum_scale=momentum_scale,
-                                rmsprop=rmsprop)
+                                adadelta=adadelta)
   
   if(length(sae$size) > 2){
     for(i in 2:(length(sae$size) - 1)){
@@ -55,7 +55,7 @@ sae.train <- function(x,hidden=c(10),
                                    hidden_dropout=hidden_dropout,visible_dropout=visible_dropout,
                                    L2=L2,L1=L1,
                                    momentummax=momentummax,momentum_scale=momentum_scale,
-                                   rmsprop=rmsprop)
+                                   adadelta=adadelta)
     }
   }
   sae
@@ -71,7 +71,7 @@ sae.dnn.train <- function(x,y,hidden=c(10),
                           numepochs=3,batchsize=100,
                           hidden_dropout=0,visible_dropout=0,L2=0,L1=0,
                           momentummax=.99,momentum_scale=1,
-                          rmsprop=0){
+                          adadelta=0){
   output_dim <- 0
   if(is.vector(y)){
     output_dim <- 1
@@ -89,7 +89,7 @@ sae.dnn.train <- function(x,y,hidden=c(10),
                    momentum=momentum,
                    hidden_dropout=hidden_dropout,visible_dropout=visible_dropout,L2=L2,L1=L1,
                    momentummax=momentummax,momentum_scale=momentum_scale,
-                   rmsprop=rmsprop)
+                   adadelta=adadelta)
   message("sae has been trained.")
   initW <- list()
   initB <- list()
@@ -111,7 +111,7 @@ sae.dnn.train <- function(x,y,hidden=c(10),
                   numepochs=numepochs,batchsize=batchsize,
                   hidden_dropout=hidden_dropout,visible_dropout=visible_dropout,L2=L2,L1=L1,
                   momentummax=momentummax,momentum_scale=momentum_scale,
-                  rmsprop=rmsprop)
+                  adadelta=adadelta)
   message("deep nn has been trained.")
   dnn
 }
@@ -134,7 +134,7 @@ nn.train <- function(x,y,initW=NULL,initB=NULL,hidden=c(10),
                      numepochs=3,batchsize=100,
                      hidden_dropout=0,visible_dropout=0,L2=0,L1=0,
                      momentummax=.99,momentum_scale=1,
-                     rmsprop=0) {
+                     adadelta=0) {
   #if (!is.matrix(x)) 
   # stop("x must be a matrix!")
   input_dim <- ncol(x)
@@ -192,14 +192,16 @@ nn.train <- function(x,y,initW=NULL,initB=NULL,hidden=c(10),
     W = W,
     vW = vW,
     rW = vW,
+    hW = vW,
     B = B,
     vB = vB,
     rB = vB,
+    hB = vB,
     L2=L2,
     L1=L1,
     momentummax=momentummax,
     momentum_scale=momentum_scale,
-    rmsprop=rmsprop
+    adadelta=adadelta
   )
   
   m <- nrow(x);
@@ -316,9 +318,10 @@ nn.bp <- function(nn){
   for( i in 1:(n-1) ){
     dw <- t(d[[i+1]]) %*% nn$post[[i]] / nrow(d[[i+1]])
     dw <- dw * nn$learningrate
-    if(nn$rmsprop>0){
-      nn$rW[[i]]=nn$rmsprop*dw^2 + (1-nn$rmsprop)*nn$rW[[i]]
-      dw <- dw/(sqrt(nn$rW[[i]])+1e-6)
+    if(nn$adadelta>0){
+      nn$rW[[i]]=nn$adadelta*dw^2 + (1-nn$adadelta)*nn$rW[[i]]
+      dw <- dw*sqrt(nn$hW[[i]]+1e-6)/sqrt(nn$rW[[i]]+1e-6)
+      nn$hW[[i]]=nn$adadelta*dw^2 + (1-nn$adadelta)*nn$hW[[i]]
     }
     if(nn$momentum > 0){
       nn$vW[[i]] <- nn$momentum * nn$vW[[i]] + dw
@@ -333,9 +336,10 @@ nn.bp <- function(nn){
     }
     db <- colMeans(d[[i+1]])
     db <- db * nn$learningrate
-    if(nn$rmsprop>0){
-      nn$rB[[i]]=nn$rmsprop*db^2 + (1-nn$rmsprop)*nn$rB[[i]]
-      db <- db/(sqrt(nn$rB[[i]])+1e-6)
+    if(nn$adadelta>0){
+      nn$rB[[i]]=nn$adadelta*db^2 + (1-nn$adadelta)*nn$rB[[i]]
+      db <- db*sqrt(nn$hB[[i]]+1e-6)/sqrt(nn$rB[[i]]+1e-6)
+      nn$hB[[i]]=nn$adadelta*db^2 + (1-nn$adadelta)*nn$hB[[i]]
     }
     if(nn$momentum > 0){
       nn$vB[[i]] <- nn$momentum * nn$vB[[i]] + db
@@ -426,7 +430,7 @@ unfoldsae=function(x,sae,
                    numepochs=3,batchsize=100,
                    hidden_dropout=0.5,visible_dropout=0,L2=0,L1=0,
                    momentummax=.99,momentum_scale=1,
-                   rmsprop=0){
+                   adadelta=0){
   output_dim=sae$size[1]
   initW <- list()
   initB <- list()
@@ -461,6 +465,6 @@ unfoldsae=function(x,sae,
                   numepochs=numepochs,batchsize=batchsize,
                   hidden_dropout=hidden_dropout,visible_dropout=visible_dropout,L2=L2,L1=L1,
                   momentummax=momentummax,momentum_scale=momentum_scale,
-                  rmsprop=rmsprop)
+                  adadelta=adadelta)
   dnn
 }
