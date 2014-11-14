@@ -7,7 +7,7 @@ sae.train <- function(x,hidden=c(10),
                       numepochs=3,batchsize=100,
                       hidden_dropout=0,visible_dropout=0.2,L2=0,L1=0,
                       momentummax=.99,momentum_scale=1,
-                      adadelta=0){
+                      adadelta=0,weightconstraints=0,sparseinit=0){
   #if (!is.matrix(x)) 
   #  stop("x must be a matrix!")
   input_dim <- ncol(x)
@@ -18,9 +18,12 @@ sae.train <- function(x,hidden=c(10),
     size = size
   )
   train_x <- x
+  if(length(activationfun)==1){
+    activationfun=rep(activationfun,length(size)-1)  
+  }
   message(sprintf("training layer 1 autoencoder ..."))
   sae$encoder[[1]] <-  nn.train(train_x,train_x,hidden=c(hidden[1]),
-                                activationfun=activationfun,
+                                activationfun=activationfun[1],
                                 learningrate=learningrate,
                                 momentum=momentum,
                                 learningrate_scale=learningrate_scale,
@@ -29,7 +32,8 @@ sae.train <- function(x,hidden=c(10),
                                 hidden_dropout=hidden_dropout,visible_dropout=visible_dropout,
                                 L2=L2,L1=L1,
                                 momentummax=momentummax,momentum_scale=momentum_scale,
-                                adadelta=adadelta)
+                                adadelta=adadelta,weightconstraints=weightconstraints,
+                                sparseinit=sparseinit)
   
   if(length(sae$size) > 2){
     for(i in 2:(length(sae$size) - 1)){
@@ -40,13 +44,15 @@ sae.train <- function(x,hidden=c(10),
         post <- binsigm( pre )
       }else if(sae$encoder[[i-1]]$activationfun[i-1] == "tanh"){
         post <- tanh(pre)
+      }else if(sae$encoder[[i-1]]$activationfun[i-1] == "relu"){
+        post <- relu(pre)
       }else{
         stop("unsupport activation function 'nn$activationfun'");
       }  
       train_x <- post
       message(sprintf("training layer %d autoencoder ...",i))
       sae$encoder[[i]] <- nn.train(train_x,train_x,hidden=c(hidden[i]),
-                                   activationfun=activationfun,
+                                   activationfun=activationfun[i],
                                    learningrate=learningrate,
                                    momentum=momentum,
                                    learningrate_scale=learningrate_scale,
@@ -55,7 +61,8 @@ sae.train <- function(x,hidden=c(10),
                                    hidden_dropout=hidden_dropout,visible_dropout=visible_dropout,
                                    L2=L2,L1=L1,
                                    momentummax=momentummax,momentum_scale=momentum_scale,
-                                   adadelta=adadelta)
+                                   adadelta=adadelta,weightconstraints=weightconstraints,
+                                   sparseinit=sparseinit)
     }
   }
   sae
@@ -71,7 +78,7 @@ sae.dnn.train <- function(x,y,hidden=c(10),
                           numepochs=3,batchsize=100,
                           hidden_dropout=0,visible_dropout=0,L2=0,L1=0,
                           momentummax=.99,momentum_scale=1,
-                          adadelta=0){
+                          adadelta=0,weightconstraints=0,sparseinit=0){
   output_dim <- 0
   if(is.vector(y)){
     output_dim <- 1
@@ -89,7 +96,8 @@ sae.dnn.train <- function(x,y,hidden=c(10),
                    momentum=momentum,
                    hidden_dropout=hidden_dropout,visible_dropout=visible_dropout,L2=L2,L1=L1,
                    momentummax=momentummax,momentum_scale=momentum_scale,
-                   adadelta=adadelta)
+                   adadelta=adadelta,weightconstraints=weightconstraints,
+                   sparseinit=sparseinit)
   message("sae has been trained.")
   initW <- list()
   initB <- list()
@@ -111,7 +119,8 @@ sae.dnn.train <- function(x,y,hidden=c(10),
                   numepochs=numepochs,batchsize=batchsize,
                   hidden_dropout=hidden_dropout,visible_dropout=visible_dropout,L2=L2,L1=L1,
                   momentummax=momentummax,momentum_scale=momentum_scale,
-                  adadelta=adadelta)
+                  adadelta=adadelta,weightconstraints=weightconstraints,
+                  sparseinit=sparseinit)
   message("deep nn has been trained.")
   dnn
 }
@@ -125,6 +134,10 @@ binsigm <- function(x,t=0.5){
   1*(sigm(x)>t)
 }
 
+relu <- function(x){
+  pmax(x,0)
+}
+
 nn.train <- function(x,y,initW=NULL,initB=NULL,hidden=c(10),
                      activationfun="sigm",
                      learningrate=0.8,
@@ -134,7 +147,7 @@ nn.train <- function(x,y,initW=NULL,initB=NULL,hidden=c(10),
                      numepochs=3,batchsize=100,
                      hidden_dropout=0,visible_dropout=0,L2=0,L1=0,
                      momentummax=.99,momentum_scale=1,
-                     adadelta=0) {
+                     adadelta=0,weightconstraints=0,sparseinit=0) {
   #if (!is.matrix(x)) 
   # stop("x must be a matrix!")
   input_dim <- ncol(x)
@@ -155,6 +168,10 @@ nn.train <- function(x,y,initW=NULL,initB=NULL,hidden=c(10),
     #random init weights and bias between layers							 
     for( i in 2:length(size) ){
       W[[i-1]] <- matrix(runif(size[i]*size[i-1],min=-0.1,max=0.1), c(size[i],size[i-1]));
+      if(sparseinit>0){
+        nparam=prod(dim(W[[i-1]]))
+        W[[i-1]][sample(nparam,floor(nparam*(1-sparseinit)))] <- 0
+      }
       B[[i-1]] <- runif(size[i],min=--0.1,max=0.1);
       vW[[i-1]] <- matrix(rep(0,size[i]*size[i-1]),c(size[i],size[i-1]))
       vB[[i-1]] <- rep(0,size[i])
@@ -177,7 +194,6 @@ nn.train <- function(x,y,initW=NULL,initB=NULL,hidden=c(10),
   if(length(activationfun)==1){
     activationfun=rep(activationfun,length(size)-1)  
   }
-  
   nn <- list(
     input_dim = input_dim,
     output_dim = output_dim,
@@ -191,18 +207,21 @@ nn.train <- function(x,y,initW=NULL,initB=NULL,hidden=c(10),
     output = output,
     W = W,
     vW = vW,
-    rW = vW,
-    hW = vW,
     B = B,
     vB = vB,
-    rB = vB,
-    hB = vB,
     L2=L2,
     L1=L1,
     momentummax=momentummax,
     momentum_scale=momentum_scale,
-    adadelta=adadelta
+    adadelta=adadelta,
+    weightconstraints=weightconstraints
   )
+  if(adadelta>0){
+    nn$rW=vW
+    nn$hW=vW
+    nn$rB=vB
+    nn$hB=vB
+  }
   
   m <- nrow(x);
   numbatches <- m / batchsize;
@@ -237,7 +256,7 @@ nn.train <- function(x,y,initW=NULL,initB=NULL,hidden=c(10),
     
     nn$learningrate <- nn$learningrate * nn$learningrate_scale;
     nn$momentum <- min(nn$momentummax,nn$momentum^nn$momentum_scale)
-    
+    message(sprintf("##epoch %d / %d complete",i,numepochs))
   }
   
   nn
@@ -259,6 +278,8 @@ nn.ff <- function(nn,batch_x,batch_y,s){
       nn$post[[i]] <- binsigm(nn$pre[[i]])
     }else if(nn$activationfun[i-1] == "tanh"){
       nn$post[[i]] <- tanh(nn$pre[[i]])
+    }else if(nn$activationfun[i-1] == "relu"){
+      nn$post[[i]] <- relu(nn$pre[[i]])
     }else{
       stop("unsupport activation function!");
     }	
@@ -274,6 +295,10 @@ nn.ff <- function(nn,batch_x,batch_y,s){
     nn$post[[i]] <- sigm(nn$pre[[i]])
     nn$e <- batch_y - nn$post[[i]]
     nn$L[ s ] <- 0.5*sum(nn$e^2)/m
+  }else if(nn$output == "binsigm"){
+    nn$post[[i]] <- binsigm(nn$pre[[i]])
+    nn$e <- batch_y - nn$post[[i]]
+    nn$L[ s ] <- 0.5*sum(nn$e^2)/m
   }else if(nn$output == "linear"){
     nn$post[[i]] <- nn$pre[[i]]
     nn$e <- batch_y - nn$post[[i]]
@@ -286,7 +311,7 @@ nn.ff <- function(nn,batch_x,batch_y,s){
   }else{
     stop("unsupport output function!");
   }	
-  if(s %% 10000 == 0){
+  if(s %% 10 == 0){
     message(sprintf("####loss on step %d is : %f",s,nn$L[ s ]))
   }
   
@@ -301,6 +326,8 @@ nn.bp <- function(nn){
     d[[n]] <- -nn$e * (nn$post[[n]] * (1 - nn$post[[n]]))
   }else if(nn$output == "linear" || nn$output == "softmax"){
     d[[n]] <- -nn$e
+  }else if (nn$output == "relu"){
+    d[[n]] <- -nn$e * (nn$post[[n]]>0)
   }
   
   for( i in (n-1):2 ){
@@ -308,6 +335,8 @@ nn.bp <- function(nn){
       d_act <- nn$post[[i]] * (1-nn$post[[i]])
     }else if(nn$activationfun[i-1]  == "tanh" ){
       d_act <- 1.7159 * 2/3 * (1 - 1/(1.7159)^2 * nn$post[[i]]^2)
+    } else if(nn$activationfun[i-1] == 'relu'){
+      d_act <- 1*(nn$post[[i]]>0)
     }
     d[[i]] <- (d[[i+1]] %*% nn$W[[i]]) * d_act
     if(nn$hidden_dropout > 0){
@@ -333,6 +362,12 @@ nn.bp <- function(nn){
     #nn$W[[i]] <- nn$W[[i]] - sign(nn$W[[i]])*pmin(abs(nn$W[[i]]),nn$learningrate*nn$L1)  #L1
     if(nn$L1>0){
       nn$W[[i]] <- sign(nn$W[[i]])*pmax(abs(nn$W[[i]])-nn$learningrate*nn$L1,0)  #L1
+    }
+    if(nn$weightconstraints>0){
+      dimw=dim(nn$W[[i]])
+      cl=sqrt((nn$W[[i]]^2)%*%rep(1/dimw[2],dimw[2]))
+      cl=pmax(cl,nn$weightconstraints)/nn$weightconstraints
+      nn$W[[i]]=nn$W[[i]]/matrix(cl,dimw[1],dimw[2])
     }
     db <- colMeans(d[[i+1]])
     db <- db * nn$learningrate
@@ -369,6 +404,8 @@ nn.predict <- function(nn,x){
       post <- binsigm( pre )
     }else if(nn$activationfun[i-1] == "tanh"){
       post <- tanh(pre)
+    }else if(nn$activationfun[i-1] == "relu"){
+      post <- relu(pre)
     }else{
       stop("unsupport activation function 'nn$activationfun'");
     }	
@@ -379,6 +416,8 @@ nn.predict <- function(nn,x){
   pre <- t( nn$W[[i-1]] %*% t(post) + nn$B[[i-1]] )
   if(nn$output == "sigm"){
     post <- sigm( pre )
+  }else if(nn$output == 'binsigm'){
+    post <- binsigm( pre )
   }else if(nn$output == "linear"){
     post <- pre  
   }else if(nn$output == "softmax"){
@@ -430,7 +469,7 @@ unfoldsae=function(x,sae,
                    numepochs=3,batchsize=100,
                    hidden_dropout=0.5,visible_dropout=0,L2=0,L1=0,
                    momentummax=.99,momentum_scale=1,
-                   adadelta=0){
+                   adadelta=0,weightconstraints=0,sparseinit=0){
   output_dim=sae$size[1]
   initW <- list()
   initB <- list()
@@ -465,6 +504,6 @@ unfoldsae=function(x,sae,
                   numepochs=numepochs,batchsize=batchsize,
                   hidden_dropout=hidden_dropout,visible_dropout=visible_dropout,L2=L2,L1=L1,
                   momentummax=momentummax,momentum_scale=momentum_scale,
-                  adadelta=adadelta)
+                  adadelta=adadelta,weightconstraints=weightconstraints,sparseinit=sparseinit)
   dnn
 }
