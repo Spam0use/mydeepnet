@@ -37,6 +37,7 @@ sae.train <- function(x,hidden=c(10),
   
   if(length(sae$size) > 2){
     for(i in 2:(length(sae$size) - 1)){
+      #following incompatible with ff training matrix, need to refactor for big inputs
       pre <- t( sae$encoder[[i-1]]$W[[1]] %*% t(train_x) + sae$encoder[[i-1]]$B[[i-1]] )
       if(sae$encoder[[i-1]]$activationfun[i-1] == "sigm"){
         post <- sigm( pre )
@@ -419,7 +420,9 @@ nn.predict <- function(nn,x){
   }else if(nn$output == 'binsigm'){
     post <- binsigm( pre )
   }else if(nn$output == "linear"){
-    post <- pre  
+    post <- pre
+  }else if(nn$output == "relu"){
+    post <- relu( pre ) 
   }else if(nn$output == "softmax"){
     post <- exp(pre)
     post <- post / rowSums(post) 
@@ -469,7 +472,7 @@ unfoldsae=function(x,sae,
                    numepochs=3,batchsize=100,
                    hidden_dropout=0.5,visible_dropout=0,L2=0,L1=0,
                    momentummax=.99,momentum_scale=1,
-                   adadelta=0,weightconstraints=0,sparseinit=0){
+                   adadelta=0,weightconstraints=0){
   output_dim=sae$size[1]
   initW <- list()
   initB <- list()
@@ -496,14 +499,81 @@ unfoldsae=function(x,sae,
     activationfun[nl]=codeactivationfun
   }
   dnn <- nn.train(x,x,initW=initW,initB=initB,hidden=hid,
-                  activationfun=activationfun,
-                  learningrate=learningrate,
-                  momentum=momentum,
-                  learningrate_scale=learningrate_scale,
-                  output=output,
-                  numepochs=numepochs,batchsize=batchsize,
-                  hidden_dropout=hidden_dropout,visible_dropout=visible_dropout,L2=L2,L1=L1,
-                  momentummax=momentummax,momentum_scale=momentum_scale,
-                  adadelta=adadelta,weightconstraints=weightconstraints,sparseinit=sparseinit)
+                    activationfun=activationfun,
+                    learningrate=learningrate,
+                    momentum=momentum,
+                    learningrate_scale=learningrate_scale,
+                    output=output,
+                    numepochs=numepochs,batchsize=batchsize,
+                    hidden_dropout=hidden_dropout,visible_dropout=visible_dropout,L2=L2,L1=L1,
+                    momentummax=momentummax,momentum_scale=momentum_scale,
+                    adadelta=adadelta,weightconstraints=weightconstraints)
   dnn
+}
+
+
+metriclearnscore=function(dat,fctr,hidden,
+                          activationfun="sigm",
+                          codeactivationfun='sigm',
+                          learningrate=0.01,
+                          momentum=0.5,
+                          learningrate_scale=1,
+                          output="linear",
+                          numepochs=3,batchsize=50,
+                          hidden_dropout=0.5,visible_dropout=0,L2=0,L1=0,
+                          momentummax=.99,momentum_scale=1,
+                          adadelta=0.1,weightconstraints=4,sparseinit=0.1){
+  #fctr is a factor representing lower triangle of distance matrix (equivalent to area returned by dist fn)
+  # returns a score per epoch of training.  score is correlation of distance measures vs fctr.
+  # first score is of distance of native data
+  s=sae.train(dat,hidden=hidden,activationfun=activationfun,output=output,
+              numepochs=numepochs,batchsize=batchsize,learningrate=learningrate,
+              learningrate_scale=learningrate_scale,momentum=momentum,
+              hidden_dropout=hidden_dropout,visible_dropout=.2,L2=L2,L1=L1,
+              momentummax=momentummax,momentum_scale=momentum_scale,
+              adadelta=adadelta,weightconstraints=weightconstraints,
+              sparseinit=sparseinit)
+  d=dist(dat)
+  models=list()
+  reconstruction=list()
+  score=list()
+  score[['native']]=cor(d,fctr)
+  nn=unfoldsae(dat,s,activationfun=c(activationfun,rev(activationfun)[-1]),
+               learningrate=learningrate,
+               momentum=momentum,
+               learningrate_scale=learningrate_scale,
+               output=output,
+               numepochs=1,batchsize=batchsize,
+               hidden_dropout=hidden_dropout,visible_dropout=visible_dropout,L2=L2,L1=L1,
+               momentummax=momentummax,momentum_scale=momentum_scale,
+               adadelta=adadelta,weightconstraints=weightconstraints)
+  pred=nn.predict(nn,dat)
+  reconstruction[['1']]=cor(as.vector(pred),as.vector(dat))
+  temp=nn
+  temp$size=temp$size[1:(length(hidden)+1)]
+  temp$output=activationfun[length(activationfun)]
+  pred=nn.predict(temp,dat)
+  d=dist(pred)
+  score[as.character(1)]=cor(d,fctr)
+  for(i in 2:numepochs){
+    nn=nn.train(dat,dat,initW=nn$W,initB=nn$B,hidden=nn$hidden,
+                activationfun=nn$activationfun,
+                learningrate=learningrate,
+                momentum=momentum,
+                learningrate_scale=learningrate_scale,
+                output=output,
+                numepochs=1,batchsize=batchsize,
+                hidden_dropout=hidden_dropout,visible_dropout=visible_dropout,L2=L2,L1=L1,
+                momentummax=momentummax,momentum_scale=momentum_scale,
+                adadelta=adadelta,weightconstraints=weightconstraints)
+    pred=nn.predict(nn,dat)
+    reconstruction[[as.character(i)]]=cor(as.vector(pred),as.vector(dat))
+    temp=nn
+    temp$size=temp$size[1:(length(hidden)+1)]
+    temp$output=activationfun[length(activationfun)]
+    pred=nn.predict(temp,dat)
+    d=dist(pred)
+    score[as.character(i)]=cor(d,fctr)
+  }
+  list(scores=score,reconstruction=reconstruction,model=nn)
 }
